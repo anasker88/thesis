@@ -13,7 +13,7 @@ sae_ids = [
     "l{}m_8x",
 ]
 
-target_llm = 0
+target_llm = 1
 # 0:gpt-2-small, 1:llama-3.1-8B, 2:gemma-2-9b
 llm_name = llm_names[target_llm]
 sae_release = sae_names[target_llm]
@@ -38,8 +38,9 @@ en_data = pd.read_csv("data/en_data.csv")
 jp_data = pd.read_csv("data/jp_data.csv")
 
 
-layer_num = 32
-bar = tqdm(range(9, 10))
+layer_num = model.cfg.n_layers
+print(f"Layer num: {layer_num}")
+bar = tqdm(range(0, layer_num, 4))
 with open(f"{output_dir}/output.txt", "w") as f:
     for layer in bar:
         bar.set_description(f"Loading SAE for layer {layer}")
@@ -65,24 +66,35 @@ with open(f"{output_dir}/output.txt", "w") as f:
             anti_st_act = get_activations(model, sae, anti_st_prompt, target)
             # remove same pairs
             st_act, anti_st_act = remove_same_pairs(st_act, anti_st_act)
-            print(f"sample size: {st_act.shape[0]}")
-            # evaluate by diff
-            diff_sum, vals, inds, avg_diff = evaluate_by_diff(st_act, anti_st_act)
-            # 2-class classification by random forest
-            accuracy_rf, feature_importance_rf = run_random_forest(st_act, anti_st_act)
-            # 2-class classification by SVM
-            accuracy_svm, normal_vector_svm = run_svm(st_act, anti_st_act)
-            # save results
             f.write(f"Language: {'en' if i == 0 else 'jp'}\n")
+            f.write(f"samples: {len(st_act)}\n")
+            important_features = filter_out_features(st_act, anti_st_act)
+            f.write(f"Important features: {len(important_features)}\n")
+            small_st_act = st_act[:, important_features]
+            small_anti_st_act = anti_st_act[:, important_features]
+            k = 10
+            # evaluate by diff
+            diff_sum, vals, inds, avg_diff = evaluate_by_diff(
+                small_st_act, small_anti_st_act, k
+            )
+            # 2-class classification by random forest
+            accuracy_rf, feature_importance_rf = run_random_forest(
+                small_st_act, small_anti_st_act
+            )
+            # 2-class classification by SVM
+            accuracy_svm, normal_vector_svm = run_svm(small_st_act, small_anti_st_act)
+            # save results
             f.write(f"Diff sum: {diff_sum}\n")
-            f.write(f"Top 5 features: {vals}\n")
-            f.write(f"Top 5 feature indices: {inds}\n")
+            f.write(f"Top k features: {vals}\n")
+            f.write(f"Top k feature indices: {important_features[inds]}\n")
             f.write(f"Average of the absolute difference: {avg_diff}\n")
             f.write(f"Accuracy by random forest: {accuracy_rf}\n")
-            vals, inds = torch.topk(feature_importance_rf, 10)
-            f.write(f"Top 5 features by random forest: {vals}\n")
-            f.write(f"Top 5 feature indices by random forest: {inds}\n")
+            vals, inds = torch.topk(feature_importance_rf, k)
+            f.write(f"Top k features by random forest: {vals}\n")
+            f.write(
+                f"Top k feature indices by random forest: {important_features[inds]}\n"
+            )
             f.write(f"Accuracy by SVM: {accuracy_svm}\n")
-            vals, inds = torch.topk(normal_vector_svm, 10)
-            f.write(f"Top 5 features by SVM: {vals}\n")
-            f.write(f"Top 5 feature indices by SVM: {inds}\n")
+            vals, inds = torch.topk(normal_vector_svm, k)
+            f.write(f"Top k features by SVM: {vals}\n")
+            f.write(f"Top k feature indices by SVM: {important_features[inds]}\n")

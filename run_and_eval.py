@@ -124,25 +124,44 @@ def remove_same_pairs(
     return new_st_act, new_anti_st_act
 
 
-# evaluate by diff
-def evaluate_by_diff(
-    st_act: torch.Tensor, anti_st_act: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+# filter out features
+def filter_out_features(
+    st_act: torch.Tensor, anti_st_act: torch.Tensor, threshold: float = 0.5
+) -> torch.Tensor:
     """
     Args:
         st_act: Activations of stereotypical prompt(shape: (batch_size, feature_size))
         anti_st_act: Activations of anti-stereotypical prompt(shape: (batch_size, feature_size))
     Returns:
+        important_features: Features that are important for classification
+    """
+    # remove if not activated in 50% of the samples
+    deff = st_act - anti_st_act
+    act_num = (deff != 0).sum(dim=0)
+    important_features = torch.where(act_num >= st_act.shape[0] * threshold)[0]
+    return important_features
+
+
+# evaluate by diff
+def evaluate_by_diff(
+    st_act: torch.Tensor, anti_st_act: torch.Tensor, k: int = 5
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Args:
+        st_act: Activations of stereotypical prompt(shape: (batch_size, feature_size))
+        anti_st_act: Activations of anti-stereotypical prompt(shape: (batch_size, feature_size))
+        k: Top k
+    Returns:
         diff_sum: Difference of activations
-        vals: Top 5 features
-        inds: Top 5 feature indices
+        vals: Top k features
+        inds: Top k feature indices
         avg_diff: Average of the absolute difference
     """
     diff = st_act - anti_st_act
     # get sum
     diff_sum = diff.sum(dim=0)
-    # top 5 features
-    vals, inds = torch.topk(diff_sum, 5)
+    # top k features
+    vals, inds = torch.topk(diff_sum, k)
     # average of the absolute difference
     avg_diff = diff_sum.abs().mean()
     return diff_sum, vals, inds, avg_diff

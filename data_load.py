@@ -55,7 +55,7 @@ def load_and_create_data():
                     row["JP_tpl_non_neg_st"].replace("_", jp_f[j])
                 )
                 jp_data["tgt"].append(row["JP_tgt_non_neg_st"])
-        elif row["Known_stereotyped_groups"][0] == '["M"]':
+        elif row["Known_stereotyped_groups"] == '["M"]':
             for j in range(vocabulary_num):
                 en_data["st"].append(row["EN_tpl_neg_st"].replace("_", en_m[j]))
                 en_data["anti-st"].append(row["EN_tpl_neg_st"].replace("_", en_f[j]))
