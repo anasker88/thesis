@@ -5,64 +5,116 @@ from sae_lens import SAE, HookedSAETransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 
+# def find_token_combinations(tokens, target_word):
+#     """Given a list of tokens and a target word,
+#     find combinations of consecutive tokens that form the target word.
 
-def find_token_combinations(tokens, target_word):
-    """Given a list of tokens and a target word,
-    find combinations of consecutive tokens that form the target word.
+#     Args:
+#         tokens (list): List of tokens.
+#         target_word (str): Target word to find in the list of tokens.
 
-    Args:
-        tokens (list): List of tokens.
-        target_word (str): Target word to find in the list of tokens.
+#     Returns:
+#         list of tuples: List of tuples where each tuple contains the start and end index of the tokens forming the target word.
+#     """
+#     results = []
+#     for start_idx in range(len(tokens)):
+#         # skip empty tokens
+#         if not tokens[start_idx]:
+#             continue
+#         combined_word = ""
+#         for end_idx in range(start_idx, len(tokens)):
+#             combined_word += tokens[end_idx]
+#             if end_idx == start_idx:
+#                 combined_word = combined_word.lstrip(" ")
+#             # Check if the combined word matches the target word
+#             if combined_word == target_word:
+#                 results.append((start_idx, end_idx))
+#             # Break if the combined word is longer than the target word
+#             if len(combined_word) > len(target_word):
+#                 break
+#     return results
 
-    Returns:
-        list of tuples: List of tuples where each tuple contains the start and end index of the tokens forming the target word.
+
+# def normalize_and_find_target(tokens, target_word):
+#     """Normalize tokens and find the target word in the list of tokens.
+
+#     Args:
+#         tokens (list): List of tokens.
+#         target_word (str): Target word to find in the list of tokens.
+
+#     Returns:
+#         list of tuples: List of tuples where each tuple contains the start and end index of the tokens forming the target word.
+#     """
+#     # Normalize tokens
+#     # tokens = [token.replace(" ", "").lower() for token in tokens]
+#     # Find target word in the list of tokens
+#     result = find_token_combinations(tokens, target_word)
+#     if len(result) > 0:
+#         return result
+#     # If target word is not found, try with 's' appended
+#     result = find_token_combinations(tokens, target_word + "s")
+#     if len(result) > 0:
+#         return result
+#     # If target word is not found, try with 't' appended
+#     result = find_token_combinations(tokens, target_word + "t")
+#     if len(result) > 0:
+#         return result
+#     print(f"Target word '{target_word}' not found in the tokens.")
+#     print(f"Tokens: {tokens}")
+#     return [(0, 0)]
+
+
+def find_target_index(
+    sentence: str, target_phrase: str, model: HookedSAETransformer
+) -> Tuple[int, int]:
     """
-    results = []
-    for start_idx in range(len(tokens)):
-        # skip empty tokens
-        if not tokens[start_idx]:
-            continue
-        combined_word = ""
-        for end_idx in range(start_idx, len(tokens)):
-            combined_word += tokens[end_idx]
-            if end_idx == start_idx:
-                combined_word = combined_word.lstrip(" ")
-            # Check if the combined word matches the target word
-            if combined_word == target_word:
-                results.append((start_idx, end_idx))
-            # Break if the combined word is longer than the target word
-            if len(combined_word) > len(target_word):
-                break
-    return results
-
-
-def normalize_and_find_target(tokens, target_word):
-    """Normalize tokens and find the target word in the list of tokens.
-
     Args:
-        tokens (list): List of tokens.
-        target_word (str): Target word to find in the list of tokens.
-
-    Returns:
-        list of tuples: List of tuples where each tuple contains the start and end index of the tokens forming the target word.
+        sentence: Sentence
+        target_phrase: Target phrase
+        model: Model
+        Returns:
+        target_index: Target index
     """
-    # Normalize tokens
-    # tokens = [token.replace(" ", "").lower() for token in tokens]
-    # Find target word in the list of tokens
-    result = find_token_combinations(tokens, target_word)
-    if len(result) > 0:
-        return result
-    # If target word is not found, try with 's' appended
-    result = find_token_combinations(tokens, target_word + "s")
-    if len(result) > 0:
-        return result
-    # If target word is not found, try with 't' appended
-    result = find_token_combinations(tokens, target_word + "t")
-    if len(result) > 0:
-        return result
-    print(f"Target word '{target_word}' not found in the tokens.")
-    print(f"Tokens: {tokens}")
-    return [(0, 0)]
+    # get target_phrase index in the sentence
+    start_index = sentence.find(target_phrase) + 1
+    end_index = start_index + len(target_phrase) - 1
+    # print(f"Start index: {start_index}")
+    # print(f"End index: {end_index}")
+    # print(f"Target phrase: {target_phrase}")
+    if start_index == -1:
+        print(f"Target phrase '{target_phrase}' not found in the sentence.")
+        print(f"Sentence: {sentence}")
+        return (0, 0, 0)
+    # get token indices
+    tokens_indices = model.tokenizer(sentence, return_offsets_mapping=True)[
+        "offset_mapping"
+    ]
+    # print(f"Tokens: {tokens_indices}")
+    target_index = (0, 0, 0)
+    for i, token in enumerate(tokens_indices):
+        if start_index < token[0]:
+            break
+        target_index = (i, 0, 0)
+        if start_index == token[0]:
+            break
+    for i, token in enumerate(tokens_indices):
+        if end_index < token[1]:
+            break
+        target_index = (target_index[0], i, 0)
+    tokens = model.to_str_tokens(sentence)
+    # prepend bos if not present
+    if len(tokens) != len(tokens_indices):
+        if len(tokens) == len(tokens_indices) + 1:
+            target_index = (target_index[0] + 1, target_index[1] + 1)
+        else:
+            print(f"Token length mismatch: {len(tokens)} and {len(tokens_indices)}")
+            return (0, 0, 0)
+    target_index = (target_index[0], target_index[1], len(tokens))
+    # print(f"Target index: {target_index}")
+    # print(f"Tokens: {tokens}")
+    # constructed_target = "".join(tokens[target_index[0] : target_index[1] + 1])
+    # print(f"Constructed target: {constructed_target}")
+    return target_index
 
 
 def get_activations(
@@ -95,11 +147,10 @@ def get_activations(
         # get the max activations of features among target indices
         for i in range(start_index, end_index):
             # print(model.to_str_tokens(prompts[i]))
-            target_index = normalize_and_find_target(
-                model.to_str_tokens(prompts[i]), target[i]
-            )
-            for j in range(target_index[0][0], target_index[0][1] + 1):
-                activations[i] = torch.max(activations[i], cache[i - start_index, j, :])
+            target_index = find_target_index(prompts[i], target[i], model)
+            for j in range(target_index[0], target_index[1] + 1):
+                # activations[i] = torch.max(activations[i], cache[i - start_index, j, :])
+                activations[i] = cache[i - start_index, j, :]
         del cache
         # if start_index > 10:
         #     exit()
@@ -145,7 +196,7 @@ def filter_out_features(
 # evaluate by diff
 def evaluate_by_diff(
     st_act: torch.Tensor, anti_st_act: torch.Tensor, k: int = 5
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Args:
         st_act: Activations of stereotypical prompt(shape: (batch_size, feature_size))
@@ -155,16 +206,13 @@ def evaluate_by_diff(
         diff_sum: Difference of activations
         vals: Top k features
         inds: Top k feature indices
-        avg_diff: Average of the absolute difference
     """
     diff = st_act - anti_st_act
     # get sum
     diff_sum = diff.sum(dim=0)
     # top k features
     vals, inds = torch.topk(diff_sum, k)
-    # average of the absolute difference
-    avg_diff = diff_sum.abs().mean()
-    return diff_sum, vals, inds, avg_diff
+    return diff_sum, vals, inds
 
 
 # 2-class classification by random forest
@@ -215,3 +263,28 @@ def run_svm(
     normal_vector = torch.tensor(clf.coef_)
 
     return accuracy, normal_vector
+
+
+# activation score
+def activation_score(st_act: torch.Tensor, anti_st_act: torch.Tensor) -> torch.Tensor:
+    """
+    +1 if diff is positive and -1 if diff is negative.The activation score is sum/n_samples
+    Args:
+        st_act: Activations of stereotypical prompt(shape: (batch_size, feature_size))
+        anti_st_act: Activations of anti-stereotypical prompt(shape: (batch_size, feature_size))
+    Returns:
+        activation_score: Activation score
+    """
+    diff = st_act - anti_st_act
+    score = torch.where(
+        diff > 0,
+        torch.tensor(1.0),
+        torch.tensor(0.0),
+    )
+    score += torch.where(
+        diff < 0,
+        torch.tensor(-1.0),
+        torch.tensor(0.0),
+    )
+    activation_score = score.sum(dim=0) / st_act.shape[0]
+    return activation_score

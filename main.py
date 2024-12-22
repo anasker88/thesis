@@ -13,7 +13,7 @@ sae_ids = [
     "l{}m_8x",
 ]
 
-target_llm = 1
+target_llm = 0
 # 0:gpt-2-small, 1:llama-3.1-8B, 2:gemma-2-9b
 llm_name = llm_names[target_llm]
 sae_release = sae_names[target_llm]
@@ -72,11 +72,9 @@ with open(f"{output_dir}/output.txt", "w") as f:
             f.write(f"Important features: {len(important_features)}\n")
             small_st_act = st_act[:, important_features]
             small_anti_st_act = anti_st_act[:, important_features]
-            k = 10
+            k = min(10, len(important_features))
             # evaluate by diff
-            diff_sum, vals, inds, avg_diff = evaluate_by_diff(
-                small_st_act, small_anti_st_act, k
-            )
+            diff_sum, vals, inds = evaluate_by_diff(small_st_act, small_anti_st_act, k)
             # 2-class classification by random forest
             accuracy_rf, feature_importance_rf = run_random_forest(
                 small_st_act, small_anti_st_act
@@ -84,17 +82,23 @@ with open(f"{output_dir}/output.txt", "w") as f:
             # 2-class classification by SVM
             accuracy_svm, normal_vector_svm = run_svm(small_st_act, small_anti_st_act)
             # save results
-            f.write(f"Diff sum: {diff_sum}\n")
+            # f.write(f"Diff sum: {diff_sum}\n")
+            avg_diff = (st_act - anti_st_act).abs().sum(dim=0).mean()
+            scores = activation_score(st_act, anti_st_act)
             f.write(f"Top k features: {vals}\n")
             f.write(f"Top k feature indices: {important_features[inds]}\n")
             f.write(f"Average of the absolute difference: {avg_diff}\n")
-            f.write(f"Accuracy by random forest: {accuracy_rf}\n")
-            vals, inds = torch.topk(feature_importance_rf, k)
-            f.write(f"Top k features by random forest: {vals}\n")
-            f.write(
-                f"Top k feature indices by random forest: {important_features[inds]}\n"
-            )
+            # f.write(f"Accuracy by random forest: {accuracy_rf}\n")
+            # vals, inds = torch.topk(feature_importance_rf, k)
+            # f.write(f"Top k features by random forest: {vals}\n")
+            # f.write(
+            #     f"Top k feature indices by random forest: {important_features[inds]}\n"
+            # )
             f.write(f"Accuracy by SVM: {accuracy_svm}\n")
-            vals, inds = torch.topk(normal_vector_svm, k)
-            f.write(f"Top k features by SVM: {vals}\n")
+            vals, inds = torch.topk(normal_vector_svm.abs(), k)
+            f.write(f"Top k features activations by SVM: {diff_sum[inds]}\n")
             f.write(f"Top k feature indices by SVM: {important_features[inds]}\n")
+            vals, inds = torch.topk(scores, k)
+            f.write(f"Top k features activations by score: {vals}\n")
+            f.write(f"Top k feature indices by score: {inds}\n")
+            f.write("\n")
