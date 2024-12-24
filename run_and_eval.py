@@ -122,7 +122,7 @@ def get_activations(
     sae: SAE,
     prompts: list[str],
     target: list[str],
-    width: int = 5,
+    width: int = 20,
 ) -> torch.Tensor:
     """
     Args:
@@ -134,14 +134,14 @@ def get_activations(
         activations: Max activations of features at target index(shape: (batch_size, feature_size))
     """
     activations = torch.zeros(len(prompts), sae.cfg.d_sae, device=sae.device)
-    for i in range((len(prompts) + 4) // width):
+    for i in range((len(prompts) -1) // width+1):
         start_index = width * i
         end_index = min(width * (i + 1), len(prompts))
         _, cache = model.run_with_cache_with_saes(
             prompts[start_index:end_index],
             saes=[sae],
-            # stop_at_layer=sae.cfg.hook_layer + 1,
-            # names_filter=[sae.cfg.hook_name + ".hook_sae_acts_post"],
+            stop_at_layer=sae.cfg.hook_layer + 1,
+            names_filter=[sae.cfg.hook_name + ".hook_sae_acts_post"],
         )
         cache = cache[sae.cfg.hook_name + ".hook_sae_acts_post"]
         # get the max activations of features among target indices

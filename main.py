@@ -28,13 +28,13 @@ def show_activation(st_act, anti_st_act, layer, feature, language, layers):
 
 
 llm_names = ["gpt2-small", "meta-llama/Llama-3.1-8B", "gemma-2-9b"]
-sae_names = ["gpt2-small-res-jb", "llama_scope_lxm_8x", "google/gemma-scope-9b-pt-mlp"]
+sae_names = ["gpt2-small-res-jb", "llama_scope_lxm_32x", "google/gemma-scope-9b-pt-mlp"]
 sae_ids = [
     "blocks.{}.hook_resid_pre",
-    "l{}m_8x",
+    "l{}m_32x",
 ]
 
-target_llm = 0
+target_llm = 1
 # 0:gpt-2-small, 1:llama-3.1-8B, 2:gemma-2-9b
 k = 10
 llm_name = llm_names[target_llm]
@@ -64,7 +64,7 @@ jp_data = pd.read_csv("data/jp_data.csv")
 
 layer_num = model.cfg.n_layers
 print(f"Layer num: {layer_num}")
-layers = range(0, layer_num, 10)
+layers = range(0, layer_num)
 bar = tqdm(layers)
 st_act_list = [[], []]
 anti_st_act_list = [[], []]
@@ -92,8 +92,8 @@ with open(f"{output_dir}/output.txt", "w") as f:
             # get activations
             st_act = get_activations(model, sae, st_prompt, target)
             anti_st_act = get_activations(model, sae, anti_st_prompt, target)
-            st_act_list[i].append(st_act)
-            anti_st_act_list[i].append(anti_st_act)
+            st_act_list[i].append(st_act.cpu())
+            anti_st_act_list[i].append(anti_st_act.cpu())
             # remove same pairs
             st_act, anti_st_act = remove_same_pairs(st_act, anti_st_act)
             f.write(f"Language: {'en' if i == 0 else 'jp'}\n")
@@ -105,7 +105,7 @@ with open(f"{output_dir}/output.txt", "w") as f:
             k = min(k, len(important_features))
             # evaluate by diff
             diff_sum, vals, inds = evaluate_by_diff(st_act, anti_st_act, k)
-            diff_sum_list[i].append(diff_sum)
+            diff_sum_list[i].append(diff_sum.cpu())
             # 2-class classification by random forest
             accuracy_rf, feature_importance_rf = run_random_forest(
                 small_st_act, small_anti_st_act
@@ -133,6 +133,10 @@ with open(f"{output_dir}/output.txt", "w") as f:
             # f.write(f"Top k features activations by score: {vals}\n")
             # f.write(f"Top k feature indices by score: {inds}\n")
             # f.write("\n")
+            del st_act, anti_st_act, small_st_act, small_anti_st_act
+            torch.cuda.empty_cache()
+        del sae
+        torch.cuda.empty_cache()
     layer_num = len(st_act_list[0])
     sentences = len(st_act_list[0][0])
     features = len(st_act_list[0][0][0])
