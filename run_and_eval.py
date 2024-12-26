@@ -4,6 +4,7 @@ import torch
 from sae_lens import SAE, HookedSAETransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.metrics import recall_score, precision_score, f1_score
 
 # def find_token_combinations(tokens, target_word):
 #     """Given a list of tokens and a target word,
@@ -187,9 +188,9 @@ def filter_out_features(
         important_features: Features that are important for classification
     """
     # remove if not activated in 50% of the samples
-    deff = st_act - anti_st_act
-    act_num = (deff != 0).sum(dim=0)
-    important_features = torch.where(act_num >= st_act.shape[0] * threshold)[0]
+    diff = st_act - anti_st_act
+    act_num = (diff != 0).sum(dim=0)
+    important_features = torch.where(act_num > st_act.shape[0] * threshold)[0]
     return important_features
 
 
@@ -288,3 +289,33 @@ def activation_score(st_act: torch.Tensor, anti_st_act: torch.Tensor) -> torch.T
     )
     activation_score = score.sum(dim=0) / st_act.shape[0]
     return activation_score
+
+def k_sparse_probing(top_k:Tuple[torch.Tensor,torch.Tensor],language:int,train_inds:torch.Tensor,test_inds:torch.Tensor) -> Tuple[float, float, float]:
+    lang=["en","jp"]
+    st_act=[]
+    anti_st_act=[]
+    layers,features=top_k
+    # load activations
+    for layer,feature in zip(layers,features):
+        st=torch.load(f"temp/{lang[language]}_st_act_{layer}.pt")
+        st=st[:,feature]
+        anti=torch.load(f"temp/{lang[language]}_anti_st_act_{layer}.pt")
+        anti=anti[:,feature]
+        st_act.append(st)
+        anti_st_act.append(anti)
+        del st,anti
+        torch.cuda.empty_cache()
+    st_act=torch.stack(st_act,dim=1)
+    anti_st_act=torch.stack(anti_st_act,dim=1)
+    train_act=torch.cat([st_act[train_inds],anti_st_act[train_inds]],dim=0)
+    test_act=torch.cat([st_act[test_inds],anti_st_act[test_inds]],dim=0)
+    print(f"train_act: {train_act.shape}\n")
+    train_labels=torch.cat([torch.ones(st_act[train_inds].shape[0]),torch.zeros(anti_st_act[train_inds].shape[0])])
+    test_labels=torch.cat([torch.ones(st_act[test_inds].shape[0]),torch.zeros(anti_st_act[test_inds].shape[0])])
+    #svm
+    clf = SVC(kernel="linear")
+    clf.fit(train_act.cpu().numpy(), train_labels.cpu().numpy())
+    f_1=f1_score(test_labels.cpu().numpy(),clf.predict(test_act.cpu().numpy()))
+    recall=recall_score(test_labels.cpu().numpy(),clf.predict(test_act.cpu().numpy()))
+    precision=precision_score(test_labels.cpu().numpy(),clf.predict(test_act.cpu().numpy()))
+    return f_1,recall,precision
