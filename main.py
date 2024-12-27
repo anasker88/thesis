@@ -67,7 +67,7 @@ model = HookedSAETransformer.from_pretrained(llm_name, device=device)
 en_data = pd.read_csv("data/en_data.csv")
 jp_data = pd.read_csv("data/jp_data.csv")
 data_num = len(en_data)
-test_num= int(data_num * 0.1)
+test_num = int(data_num * 0.1)
 test_inds = np.random.choice(data_num, test_num, replace=False)
 train_inds = np.array([i for i in range(data_num) if i not in test_inds])
 test_inds = torch.tensor(test_inds)
@@ -98,52 +98,32 @@ with open(f"{output_dir}/output.txt", "w") as f:
             anti_st_prompt = data["anti-st"].tolist()
             target = data["tgt"]
             # get activations
-            st_act=get_activations(model, sae, st_prompt, target)
-            anti_st_act=get_activations(model, sae, anti_st_prompt, target)
-            # # remove same pairs
-            # st_act, anti_st_act = remove_same_pairs(st_act, anti_st_act)
+            st_act = get_activations(model, sae, st_prompt, target)
+            anti_st_act = get_activations(model, sae, anti_st_prompt, target)
+            # save activations
+            torch.save(st_act, f"{temp_dir}/{language}_st_act_{layer}.pt")
+            torch.save(anti_st_act, f"{temp_dir}/{language}_anti_st_act_{layer}.pt")
             f.write(f"Language: {language}\n")
-            # f.write(f"samples: {len(st_act)}\n")
-            # important_features = filter_out_features(st_act, anti_st_act,0)
-            # f.write(f"Important features: {len(important_features)}\n")
-            # small_st_act = st_act[:, important_features]
-            # small_anti_st_act = anti_st_act[:, important_features]
-            # k = min(k, len(important_features))
             # evaluate by diff
-            diff_sum, vals, inds = evaluate_by_diff(st_act[train_inds,:], anti_st_act[train_inds,:],k)
+            diff_sum, vals, inds = evaluate_by_diff(
+                st_act[train_inds, :], anti_st_act[train_inds, :], k
+            )
             diff_sum_list[i].append(diff_sum)
-            # # 2-class classification by random forest
-            # accuracy_rf, feature_importance_rf = run_random_forest(
-            #     small_st_act, small_anti_st_act
-            # )
-            # # 2-class classification by SVM
-            # accuracy_svm, normal_vector_svm = run_svm(small_st_act, small_anti_st_act)
-            # save results
-            # f.write(f"Diff sum: {diff_sum}\n")
-            avg_diff = (st_act[train_inds,:] - anti_st_act[train_inds,:]).abs().sum(dim=0).mean()
+            avg_diff = (
+                (st_act[train_inds, :] - anti_st_act[train_inds, :])
+                .abs()
+                .sum(dim=0)
+                .mean()
+            )
             # scores = activation_score(st_act, anti_st_act)
             f.write(f"Top k features: {vals}\n")
             f.write(f"Top k feature indices: {inds}\n")
             f.write(f"Average of the absolute difference: {avg_diff}\n")
-            # save activations
-            torch.save(st_act, f"{temp_dir}/{language}_st_act_{layer}.pt")
-            torch.save(anti_st_act, f"{temp_dir}/{language}_anti_st_act_{layer}.pt")
-            # f.write(f"Accuracy by random forest: {accuracy_rf}\n")
-            # vals, inds = torch.topk(feature_importance_rf, k)
-            # f.write(f"Top k features by random forest: {vals}\n")
-            # f.write(
-            #     f"Top k feature indices by random forest: {important_features[inds]}\n"
-            # )
-            # f.write(f"Accuracy by SVM: {accuracy_svm}\n")
-            # vals, inds = torch.topk(normal_vector_svm.abs(), k)
-            # f.write(f"Top k features activations by SVM: {diff_sum[inds]}\n")
-            # f.write(f"Top k feature indices by SVM: {important_features[inds]}\n")
-            # vals, inds = torch.topk(scores, k)
-            # f.write(f"Top k features activations by score: {vals}\n")
-            # f.write(f"Top k feature indices by score: {inds}\n")
-            # f.write("\n")
         del sae, st_act, anti_st_act
         torch.cuda.empty_cache()
+    del model
+    torch.cuda.empty_cache()
+    k = 100
     for i in range(2):
         f.write(f"Language: {lang[i]}\n")
         vals, inds = torch.topk(torch.cat(diff_sum_list[i], dim=0), k)
@@ -161,7 +141,7 @@ with open(f"{output_dir}/output.txt", "w") as f:
             #     inds_list[top_k[0]][top_k[1]],
             #     i,
             # ))
-        f_1,recall,precision = k_sparse_probing(top_k,i,train_inds,test_inds)
+        f_1, recall, precision = k_sparse_probing(top_k, i, train_inds, test_inds)
         f.write(f"F1 score: {f_1}\n")
         f.write(f"Recall: {recall}\n")
         f.write(f"Precision: {precision}\n")
