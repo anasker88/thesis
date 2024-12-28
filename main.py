@@ -1,3 +1,4 @@
+import json
 import os
 
 import matplotlib.pyplot as plt
@@ -6,6 +7,7 @@ import pandas as pd
 import torch
 from run_and_eval import *
 from sae_lens import SAE, HookedSAETransformer
+from setup import *
 from tqdm import tqdm
 
 
@@ -31,117 +33,70 @@ def show_activation(st_act, anti_st_act, layer, feature, language):
     plt.close()
 
 
-llm_names = ["gpt2-small", "meta-llama/Llama-3.1-8B", "gemma-2-9b"]
-sae_names = ["gpt2-small-res-jb", "llama_scope_lxm_32x", "google/gemma-scope-9b-pt-mlp"]
-sae_ids = [
-    "blocks.{}.hook_resid_pre",
-    "l{}m_32x",
-]
-
-target_llm = 1
-# 0:gpt-2-small, 1:llama-3.1-8B, 2:gemma-2-9b
-k = 10
-llm_name = llm_names[target_llm]
-sae_release = sae_names[target_llm]
-sae_id = sae_ids[target_llm]
-output_dir = f"out/{sae_release}"
-os.makedirs(output_dir, exist_ok=True)
-os.makedirs(f"{output_dir}/jp", exist_ok=True)
-os.makedirs(f"{output_dir}/en", exist_ok=True)
-temp_dir = "temp"
-os.makedirs(temp_dir, exist_ok=True)
-lang = ["en", "jp"]
-# initialize
-torch.set_grad_enabled(False)
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps" if torch.mps.is_available() else "cpu"
-)
-print(f"Device: {device}")
-
-# load LLM
-model = HookedSAETransformer.from_pretrained(llm_name, device=device)
-
-# load dataset
-en_data = pd.read_csv("data/en_data.csv")
-jp_data = pd.read_csv("data/jp_data.csv")
-data_num = len(en_data)
-test_num = int(data_num * 0.1)
-test_inds = np.random.choice(data_num, test_num, replace=False)
-train_inds = np.array([i for i in range(data_num) if i not in test_inds])
-test_inds = torch.tensor(test_inds)
-train_inds = torch.tensor(train_inds)
-layer_num = model.cfg.n_layers
-print(f"Layer num: {layer_num}")
+# caluculate scores for features
+with open(f"{temp_dir}/{sae_release}/cfg_dict.json", "r") as f:
+    data_num, layer_num = json.load(f)
 layers = range(0, layer_num)
 bar = tqdm(layers)
 diff_sum_list = [[], []]
-with open(f"{output_dir}/output.txt", "w") as f:
-    for layer in bar:
-        bar.set_description(f"Loading SAE for layer {layer}")
-        # load SAE
-        sae, cfg_dict, sparsity = SAE.from_pretrained(
-            release=sae_release,  # <- Release name
-            sae_id=sae_id.format(layer),  # <- SAE id (not always a hook point!)
-            device=device,
-        )
-        f.write(f"Layer {layer}\n")
-        for i in range(2):  # 0:en, 1:jp
-            if i == 0:
-                data = en_data
-            else:
-                data = jp_data
-            language = lang[i]
-            bar.set_description(f"Processing {language} for layer {layer}")
-            st_prompt = data["st"].tolist()
-            anti_st_prompt = data["anti-st"].tolist()
-            target = data["tgt"]
-            # get activations
-            st_act = get_activations(model, sae, st_prompt, target)
-            anti_st_act = get_activations(model, sae, anti_st_prompt, target)
-            # save activations
-            torch.save(st_act, f"{temp_dir}/{language}_st_act_{layer}.pt")
-            torch.save(anti_st_act, f"{temp_dir}/{language}_anti_st_act_{layer}.pt")
-            f.write(f"Language: {language}\n")
-            # evaluate by diff
-            diff_sum, vals, inds = evaluate_by_diff(
-                st_act[train_inds, :], anti_st_act[train_inds, :], k
-            )
-            diff_sum_list[i].append(diff_sum)
-            avg_diff = (
-                (st_act[train_inds, :] - anti_st_act[train_inds, :])
-                .abs()
-                .sum(dim=0)
-                .mean()
-            )
-            # scores = activation_score(st_act, anti_st_act)
-            f.write(f"Top k features: {vals}\n")
-            f.write(f"Top k feature indices: {inds}\n")
-            f.write(f"Average of the absolute difference: {avg_diff}\n")
-        del sae, st_act, anti_st_act
-        torch.cuda.empty_cache()
-    del model
-    torch.cuda.empty_cache()
-    k = 100
+activation_score_list = [[], []]
+for layer in bar:
+    bar.set_description(f"Processing layer {layer}")
     for i in range(2):
-        f.write(f"Language: {lang[i]}\n")
-        vals, inds = torch.topk(torch.cat(diff_sum_list[i], dim=0), k)
-        feature_per_layer = diff_sum_list[i][0].shape[0]
-        top_k = (inds // feature_per_layer, inds % feature_per_layer)
-        f.write(f"Top k features activations by diff: {vals}\n")
-        for j in range(k):
-            f.write(
-                f"Top k feature indices by diff: Layer {layers[top_k[0][j]]}, Feature {top_k[1][j]}\n"
+        bar.set_description(f"Processing {lang[i]} for layer {layer}")
+        st_act = torch.load(
+            f"{temp_dir}/{sae_release}/{lang[i]}/st_act_{layer}.pt", weights_only=True
+        )
+        anti_st_act = torch.load(
+            f"{temp_dir}/{sae_release}/{lang[i]}/anti_st_act_{layer}.pt",
+            weights_only=True,
+        )
+        diff_sum, _, _ = evaluate_by_diff(st_act, anti_st_act, k)
+        diff_sum_list[i].append(diff_sum)
+        activation_score_list[i].append(activation_score(st_act, anti_st_act))
+# 10-fold cross validation
+rand_inds = torch.randperm(data_num)
+test_inds_list = torch.split(rand_inds, data_num // 10)
+with open(f"{output_dir}/scores.txt", "w") as f:
+    scores = torch.zeros(10, 2, 3, 2, 3)  # 10-fold, language, strategy, score
+    bar = tqdm(range(10))
+    bar.set_description("10-fold cross validation")
+    for i in bar:
+        test_inds = test_inds_list[i]
+        train_inds = torch.cat(test_inds_list[:i] + test_inds_list[i + 1 :], dim=0)
+        for j in range(2):
+            # top-k by diff
+            vals, inds = torch.topk(torch.cat(diff_sum_list[j], dim=0), k)
+            feature_per_layer = diff_sum_list[j][0].shape[0]
+            top_k = (inds // feature_per_layer, inds % feature_per_layer)
+            score = k_sparse_probing(top_k, j, train_inds, test_inds)
+            scores[i, j, 0] = score
+            vals, inds = torch.topk(
+                torch.cat(activation_score_list[j], dim=0), k, largest=False
             )
-            # show_activation(
-            #     st_act_list[i][top_k[0]][:, top_k[1]],
-            #     anti_st_act_list[i][top_k[0]][:, top_k[1]],
-            #     layers[top_k[0]],
-            #     inds_list[top_k[0]][top_k[1]],
-            #     i,
-            # ))
-        f_1, recall, precision = k_sparse_probing(top_k, i, train_inds, test_inds)
-        f.write(f"F1 score: {f_1}\n")
-        f.write(f"Recall: {recall}\n")
-        f.write(f"Precision: {precision}\n")
+            # top-k by activation score
+            top_k = (inds // feature_per_layer, inds % feature_per_layer)
+            score = k_sparse_probing(top_k, j, train_inds, test_inds)
+            scores[i, j, 1] = score
+            # random
+            random_inds = torch.randperm(feature_per_layer)
+            top_k = (
+                random_inds[:k] // feature_per_layer,
+                random_inds[:k] % feature_per_layer,
+            )
+            score = k_sparse_probing(top_k, j, train_inds, test_inds)
+            scores[i, j, 2] = score
+    # average
+    scores = scores.mean(dim=0)
+    for i in range(2):
+        f.write(f"{lang[i]}\n")
+        for j in range(3):
+            f.write(f"strategy: {strategy[j]}\n")
+            f.write(f"mono:\n")
+            f.write(f"f1: {scores[i, j, 0, 0]}\n")
+            f.write(f"precision: {scores[i, j, 0, 1]}\n")
+            f.write(f"recall: {scores[i, j, 0, 2]}\n")
+            f.write(f"cross:\n")
+            f.write(f"f1: {scores[i, j, 1, 0]}\n")
+            f.write(f"precision: {scores[i, j, 1, 1]}\n")
+            f.write(f"recall: {scores[i, j, 1, 2]}\n")
