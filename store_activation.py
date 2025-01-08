@@ -10,6 +10,14 @@ from sae_lens import SAE, HookedSAETransformer
 from setup import *
 from tqdm import tqdm
 
+# initialize
+torch.set_grad_enabled(False)
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps" if torch.mps.is_available() else "cpu"
+)
+print(f"Device: {device}")
 # load LLM
 model = HookedSAETransformer.from_pretrained(llm_name, device=device)
 
@@ -50,5 +58,7 @@ for layer in bar:
         torch.save(
             anti_st_act, f"{temp_dir}/{sae_release}/{language}/anti_st_act_{layer}.pt"
         )
+        del st_act, anti_st_act
+    del sae
 with open(f"{temp_dir}/{sae_release}/cfg_dict.json", "w") as f:
     json.dump((data_num, layer_num), f)

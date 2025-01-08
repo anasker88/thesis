@@ -4,8 +4,9 @@ from typing import Tuple
 import torch
 from sae_lens import SAE, HookedSAETransformer
 from setup import *
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import f1_score, precision_score, recall_score,accuracy_score
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 
 
 def find_target_index(
@@ -155,13 +156,13 @@ def activation_score(st_act: torch.Tensor, anti_st_act: torch.Tensor) -> torch.T
     diff = st_act - anti_st_act
     score = torch.where(
         diff > 0,
-        torch.tensor(1.0),
-        torch.tensor(0.0),
+        torch.tensor(1.0,device=diff.device),
+        torch.tensor(0.0,device=diff.device),
     )
     score += torch.where(
         diff < 0,
-        torch.tensor(-1.0),
-        torch.tensor(0.0),
+        torch.tensor(-1.0,device=diff.device),
+        torch.tensor(0.0,device=diff.device),
     )
     activation_score = score.sum(dim=0)
     return activation_score
@@ -172,6 +173,10 @@ def k_sparse_probing(
     language: int,
     train_inds: torch.Tensor,
     test_inds: torch.Tensor,
+    en_st: torch.Tensor,
+    en_anti_st: torch.Tensor,
+    jp_st: torch.Tensor,
+    jp_anti_st: torch.Tensor,
 ) -> torch.Tensor:
     lang = ["en", "jp"]
     st_act = []
@@ -181,29 +186,25 @@ def k_sparse_probing(
     layers, features = top_k
     # load activations
     for layer, feature in zip(layers, features):
-        st = torch.load(
-            f"temp/{sae_release}/{lang[language]}/st_act_{layer}.pt", weights_only=True
-        )
+        if language == 0:
+            st = en_st[layer]
+            anti = en_anti_st[layer]
+            st_other = jp_st[layer]
+            anti_other = jp_anti_st[layer]
+        else:
+            st = jp_st[layer]
+            anti = jp_anti_st[layer]
+            st_other = en_st[layer]
+            anti_other = en_anti_st[layer]
         st = st[:, feature].clone()
         st_act.append(st)
-        anti = torch.load(
-            f"temp/{sae_release}/{lang[language]}/anti_st_act_{layer}.pt",
-            weights_only=True,
-        )
         anti = anti[:, feature].clone()
         anti_st_act.append(anti)
-        st = torch.load(
-            f"temp/{sae_release}/{lang[1 - language]}/st_act_{layer}.pt",
-            weights_only=True,
-        )
-        st = st[:, feature].clone()
-        st_act_other_lang.append(st)
-        anti = torch.load(
-            f"temp/{sae_release}/{lang[1 - language]}/anti_st_act_{layer}.pt",
-            weights_only=True,
-        )
-        anti = anti[:, feature].clone()
-        anti_st_act_other_lang.append(anti)
+        st_other = st_other[:, feature].clone()
+        st_act_other_lang.append(st_other)
+        anti_other = anti_other[:, feature].clone()
+        anti_st_act_other_lang.append(anti_other)
+        del st, anti, st_other, anti_other
     st_act = torch.stack(st_act, dim=1)
     anti_st_act = torch.stack(anti_st_act, dim=1)
     st_act_other_lang = torch.stack(st_act_other_lang, dim=1)
@@ -225,19 +226,21 @@ def k_sparse_probing(
             torch.zeros(anti_st_act[test_inds].shape[0]),
         ]
     )
-    ret = torch.zeros(2, 3)
-    # svm
-    clf = SVC(kernel="linear", class_weight="balanced")
+    ret = torch.zeros(2, 4)
+    clf = LogisticRegression(max_iter=100000)
+    # clf = SVC(kernel="linear")
     clf.fit(train_act.cpu().numpy(), train_labels.cpu().numpy())
     test_pred = clf.predict(test_act.cpu().numpy())
     test_labels = test_labels.cpu().numpy()
     f_1 = f1_score(test_labels, test_pred)
-    recall = recall_score(test_labels, test_pred)
     precision = precision_score(test_labels, test_pred, zero_division=0)
-    ret[0] = torch.tensor([f_1, recall, precision])
+    recall = recall_score(test_labels, test_pred)
+    accuracy = accuracy_score(test_labels, test_pred)
+    ret[0] = torch.tensor([f_1,precision, recall,  accuracy])
     test_pred = clf.predict(test_act_other_lang.cpu().numpy())
     f_1 = f1_score(test_labels, test_pred)
-    recall = recall_score(test_labels, test_pred)
     precision = precision_score(test_labels, test_pred, zero_division=0)
-    ret[1] = torch.tensor([f_1, recall, precision])
+    recall = recall_score(test_labels, test_pred)
+    accuracy = accuracy_score(test_labels, test_pred)
+    ret[1] = torch.tensor([f_1,precision, recall, accuracy])
     return ret
