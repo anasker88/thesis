@@ -4,10 +4,9 @@ from transformer_lens import HookedTransformer
 from sae_lens import SAE, HookedSAETransformer
 import torch
 
-tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-9b")
-model = HookedTransformer.from_pretrained(
-    "google/gemma-2-9b",
-    device="cuda",
+tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b")
+model = HookedSAETransformer.from_pretrained(
+    "google/gemma-2-2b",
 )
 
 input_text = "Write me a poem about Machine Learning."

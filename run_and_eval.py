@@ -4,7 +4,7 @@ from typing import Tuple
 import torch
 from sae_lens import SAE, HookedSAETransformer
 from setup import *
-from sklearn.metrics import f1_score, precision_score, recall_score,accuracy_score
+from sklearn.metrics import f1_score, precision_score, recall_score,accuracy_score,confusion_matrix
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 
@@ -227,20 +227,34 @@ def k_sparse_probing(
         ]
     )
     ret = torch.zeros(2, 4)
-    clf = LogisticRegression(max_iter=100000)
+    clf = LogisticRegression(max_iter=1000000)
     # clf = SVC(kernel="linear")
     clf.fit(train_act.cpu().numpy(), train_labels.cpu().numpy())
     test_pred = clf.predict(test_act.cpu().numpy())
     test_labels = test_labels.cpu().numpy()
-    f_1 = f1_score(test_labels, test_pred)
-    precision = precision_score(test_labels, test_pred, zero_division=0)
-    recall = recall_score(test_labels, test_pred)
+    conf=confusion_matrix(test_labels, test_pred)
+    recall=conf[1][1]/(conf[1][1]+conf[1][0])
+    precision=0
+    if conf[1][1]+conf[0][1]==0:
+        precision=0.5
+    else:
+        precision=conf[1][1]/(conf[1][1]+conf[0][1])
+    f_1=0
+    if precision+recall!=0:
+        f_1 = 2*precision*recall/(precision+recall)
     accuracy = accuracy_score(test_labels, test_pred)
     ret[0] = torch.tensor([f_1,precision, recall,  accuracy])
     test_pred = clf.predict(test_act_other_lang.cpu().numpy())
-    f_1 = f1_score(test_labels, test_pred)
-    precision = precision_score(test_labels, test_pred, zero_division=0)
-    recall = recall_score(test_labels, test_pred)
+    conf=confusion_matrix(test_labels, test_pred)
+    recall=conf[1][1]/(conf[1][1]+conf[1][0])
+    precision=0
+    if conf[1][1]+conf[0][1]==0:
+        precision=0.5
+    else:
+        precision=conf[1][1]/(conf[1][1]+conf[0][1])
+    f_1=0
+    if precision+recall!=0:
+        f_1 = 2*precision*recall/(precision+recall)
     accuracy = accuracy_score(test_labels, test_pred)
     ret[1] = torch.tensor([f_1,precision, recall, accuracy])
     return ret
