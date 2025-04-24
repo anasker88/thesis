@@ -1,4 +1,5 @@
 import json
+import pickle
 import os
 
 import matplotlib.pyplot as plt
@@ -138,6 +139,9 @@ def visualize_tokens_with_scores(
 
     plt.savefig(f"{output_dir}/visualize/{lang[ln]}_{title}.png".replace(" ", "_"))
 
+def save_args(filename,**kwargs):
+    with open(filename, "wb") as f:
+        pickle.dump(kwargs, f)
 
 # initialize
 torch.set_grad_enabled(False)
@@ -306,6 +310,8 @@ for ln in range(2):
                 anti_st_tokens[-1].append(token)
                 before=id
         visualize_tokens_with_scores(st_tokens,st_act,anti_st_tokens,anti_st_act,ln=ln,title=f"Layer {layer} Feature {feature}",average_act=av_act)
+        # save data
+        save_args(f"{output_dir}/{lang[ln]}_layer_{layer}_feature_{feature}.pkl",st_tokens=st_tokens,st_act=st_act,anti_st_tokens=anti_st_tokens,anti_st_act=anti_st_act,av_act=av_act,title=f"Layer {layer} Feature {feature}")
         del st, anti_st, diff,sae
         torch.cuda.empty_cache()
     # activation_score

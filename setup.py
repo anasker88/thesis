@@ -10,7 +10,7 @@ sae_ids = [
     "layer_{}/width_131k/canonical",
 ]
 
-target_llm = 2
+target_llm = 1
 # 0:gpt-2-small, 1:llama-3.1-8B, 2:gemma-2-9b
 k = 100
 k_list=[2**i for i in range(10)]
